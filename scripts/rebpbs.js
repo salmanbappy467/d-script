@@ -49,22 +49,30 @@ async function verifyLoginDetails({ userid, password }) {
         const cookies = await login(userid, password);
         
         if (!cookies || cookies.length === 0) {
-            return { success: false, message: "Invalid Credentials or Network Error" };
+            return { success: false, message: "Network Error: No cookies received" };
         }
 
+        // ড্যাশবোর্ড চেক
         const dashUrl = 'http://www.rebpbs.com/UI/OnM/frm_OCMeterTesterDashboard.aspx';
         const response = await axios.get(dashUrl, { headers: { 'Cookie': cookies.join('; ') } });
         const $ = cheerio.load(response.data);
 
+        // 🔥 ফিক্স: লগইন আসলেই হয়েছে কি না চেক করা
         const pbsName = $('#ctl00_lblPBSname').text().trim();
         const userInfo = $('#ctl00_lblLoggedUser').text().trim();
+
+        // যদি PBS Name না পাওয়া যায়, তার মানে লগইন হয়নি
+        if (!pbsName) {
+            console.log("❌ Login Failed: Dashboard not accessible.");
+            return { success: false, message: "Login Failed: Invalid Credentials" };
+        }
+
         let zonalName = "Unknown Office";
-        
         if (userInfo.includes(',')) {
             zonalName = userInfo.split(',').pop().replace(']', '').trim();
         }
 
-        return { success: true, cookies, userInfo, pbs: pbsName || "N/A", zonal: zonalName };
+        return { success: true, cookies, userInfo, pbs: pbsName, zonal: zonalName };
     } catch (error) {
         return { success: false, message: error.message };
     }
@@ -154,6 +162,17 @@ async function fetchInventoryInternal(cookies, limit) {
     try {
         const res = await session.get(url);
         let $ = cheerio.load(res.data);
+        
+        // 🔥 ফিক্স: পেজ ভ্যালিডেশন
+        if ($('#txtusername').length > 0) {
+            console.log("⚠️ Redirected to Login Page!");
+            return [];
+        }
+        if ($('#ctl00_ContentPlaceHolder1_gvMeterLOG').length === 0) {
+            console.log("⚠️ Table not found (Maybe no records).");
+            // return []; // টেবিল না থাকলে রিটার্ন
+        }
+
         const parse = ($) => {
             const list = [];
             $('#ctl00_ContentPlaceHolder1_gvMeterLOG tr').each((i, el) => {
@@ -184,8 +203,17 @@ async function fetchInventoryInternal(cookies, limit) {
 
 async function getInventoryList({ userid, password, limit }) {
     console.log(`📋 Fetching Inventory for: ${userid}`);
+    
+    // ১. লগইন ভেরিফিকেশন (স্ট্রং চেক)
     const auth = await verifyLoginDetails({ userid, password });
-    if (!auth.success) return { error: auth.message };
+    
+    // ২. যদি লগইন ফেল করে তবে সরাসরি এরর রিটার্ন
+    if (!auth.success) {
+        console.log(`❌ Inventory Fetch Aborted: ${auth.message}`);
+        return { count: 0, data: [], error: auth.message };
+    }
+    
+    // ৩. ডাটা ফেচ
     const list = await fetchInventoryInternal(auth.cookies, limit || 50);
     return { count: list.length, data: list };
 }
@@ -227,15 +255,13 @@ async function processConcurrentBatch({ userid, password, meters }) {
 }
 
 // ==========================================
-// 3. MAIN RUN FUNCTION (NO AUTO-DETECT)
+// 3. MAIN RUN FUNCTION
 // ==========================================
 
 async function run(payload) {
-    // অ্যাকশন চেক (অটো ডিটেকশন নেই, ডিফাল্ট 'CHECK')
     const action = payload.action ? payload.action.toUpperCase() : 'CHECK';
     console.log(`▶ Executing Action: ${action}`);
 
-    // ফ্লেক্সিবল সুইচ কেস (যাতে strictness না থাকে)
     switch (action) {
         case 'LOGIN':
         case 'LOGIN_CHECK':
@@ -267,7 +293,6 @@ async function run(payload) {
     }
 }
 
-// সবগুলো ফাংশন এক্সপোর্ট করা যাতে ডাইরেক্ট কল করা যায়
 module.exports = {
     run, 
     verifyLoginDetails,
