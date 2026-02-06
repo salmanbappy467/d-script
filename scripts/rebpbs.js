@@ -13,13 +13,14 @@ async function login(userId, password) {
         const $ = cheerio.load(initialPage.data);
         const initialCookies = initialPage.headers['set-cookie'] || [];
 
+        // ফর্ম ডাটা সংগ্রহ
         const payload = {
             '__VIEWSTATE': $('#__VIEWSTATE').val(),
             '__VIEWSTATEGENERATOR': $('#__VIEWSTATEGENERATOR').val(),
             '__EVENTVALIDATION': $('#__EVENTVALIDATION').val(),
             'txtusername': userId,
             'txtpassword': password,
-            'btnLogin': decodeURIComponent('%E0%A6%B2%E0%A6%97%E0%A6%87%E0%A6%A8')
+            'btnLogin': decodeURIComponent('%E0%A6%B2%E0%A6%97%E0%A6%87%E0%A6%A8') // 'লগইন' এর এনকোডেড ভ্যালু
         };
 
         const response = await axios.post(url, qs.stringify(payload), {
@@ -32,6 +33,7 @@ async function login(userId, password) {
         });
 
         const authCookies = response.headers['set-cookie'] || [];
+        // কুকি মার্জ করা (Initial + Auth Cookies)
         return [...new Set([...initialCookies, ...authCookies])];
     } catch (error) {
         console.error("Login Error:", error.message);
@@ -47,7 +49,10 @@ async function verifyLoginDetails({ userid, password }) {
     try {
         console.log(`🔐 Verifying Login for: ${userid}`);
         const cookies = await login(userid, password);
-        if (!cookies || cookies.length === 0) return { success: false, message: "Invalid Credentials or Network Error" };
+        
+        if (!cookies || cookies.length === 0) {
+            return { success: false, message: "Invalid Credentials or Network Error" };
+        }
 
         const dashUrl = 'http://www.rebpbs.com/UI/OnM/frm_OCMeterTesterDashboard.aspx';
         const response = await axios.get(dashUrl, { headers: { 'Cookie': cookies.join('; ') } });
@@ -97,6 +102,7 @@ async function postMeterData(cookies, m, options = {}) {
     try {
         let newVS, newEV, pbs, zonal, gen;
 
+        // অপ্টিমাইজেশন: যদি আগের পেজ টোকেন থাকে তবে রিকোয়েস্ট কম লাগবে
         if (options.viewState) {
             newVS = options.viewState;
             newEV = options.eventValidation;
@@ -158,6 +164,8 @@ async function postMeterData(cookies, m, options = {}) {
 
         const isSuccess = finalRes.data.includes('Successful') || finalRes.data.includes('Action was Successful');
         const isDuplicate = finalRes.data.includes('Already Exists') || lblMsg.includes('exists');
+        
+        // রেজাল্ট প্রসেসিং
         let reason = isSuccess ? "Saved Successfully" : (isDuplicate ? "Duplicate Meter" : (lblMsg || "Server Rejected"));
 
         return { success: isSuccess, reason: reason, isDuplicate };
@@ -178,10 +186,11 @@ async function fetchInventoryInternal(cookies, limit) {
         const res = await session.get(url);
         let $ = cheerio.load(res.data);
         
+        // টেবিল পার্সিং ফাংশন
         const parse = ($) => {
             const list = [];
             $('#ctl00_ContentPlaceHolder1_gvMeterLOG tr').each((i, el) => {
-                if (i === 0) return;
+                if (i === 0) return; // হেডার বাদ
                 const cols = $(el).children('td');
                 if (cols.length >= 9) {
                     const mNo = $(cols[1]).text().trim();
@@ -202,6 +211,7 @@ async function fetchInventoryInternal(cookies, limit) {
 
         allMeters = parse($);
 
+        // পেজিনেশন হ্যান্ডলিং
         while (allMeters.length < limit) {
             currentPage++;
             const payload = {
@@ -262,7 +272,7 @@ async function processBatch({ userid, password, meters }, onProgress) {
         if (!postRes.success && !postRes.isDuplicate) failedCount++;
         postResults.push({ original: m, result: postRes });
         
-        await new Promise(r => setTimeout(r, 1500)); 
+        await new Promise(r => setTimeout(r, 1500)); // ডিলে
     }
 
     // ভেরিফিকেশন ধাপ
@@ -331,7 +341,7 @@ async function processConcurrentBatch({ userid, password, meters }, onProgress) 
     }
 
     let results = [];
-    const CHUNK_SIZE = 5; 
+    const CHUNK_SIZE = 5; // ৫টি করে প্যারালাল রিকোয়েস্ট
     let processedCount = 0;
 
     for (let i = 0; i < meters.length; i += CHUNK_SIZE) {
@@ -391,7 +401,7 @@ async function processConcurrentBatch({ userid, password, meters }, onProgress) 
 // ==========================================
 
 async function run(payload) {
-    // অ্যাকশন ডিটেকশন (ডিফল্ট: LOGIN_CHECK)
+    // অ্যাকশন ডিটেকশন (সব আপারকেস করা যাতে Case Sensitive সমস্যা না হয়)
     const action = payload.action ? payload.action.toUpperCase() : 'CHECK';
 
     console.log(`▶ Executing Action: ${action}`);
@@ -402,14 +412,16 @@ async function run(payload) {
         case 'CHECK':
             return await verifyLoginDetails(payload);
         
+        // 🔥 ফিক্সড: সব ধরনের ইনভেন্টরি কি-ওয়ার্ড হ্যান্ডলিং
         case 'INVENTORY':
         case 'LIST':
+        case 'GETINVENTORYLIST': 
+        case 'INVENTORY_LIST':
             return await getInventoryList(payload);
 
         case 'POST':
         case 'METER_POST':
         case 'BATCH':
-            // বি:দ্র: ডায়নামিক কলের ক্ষেত্রে Progress Callback পাওয়া যাবে না যদি না index.js আপডেট করা হয়।
             return await processBatch(payload);
 
         case 'FAST':
@@ -422,7 +434,7 @@ async function run(payload) {
     }
 }
 
-// 🔥 EXPORTS: run ফাংশন অবশ্যই থাকতে হবে
+// 🔥 EXPORTS: run ফাংশন এবং অন্যান্য মডিউল এক্সপোর্ট করা
 module.exports = {
     run, 
     verifyLoginDetails,
