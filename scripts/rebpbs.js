@@ -386,8 +386,45 @@ async function processConcurrentBatch({ userid, password, meters }, onProgress) 
     };
 }
 
-// এক্সপোর্ট করা হচ্ছে (Dynamic System অনুযায়ী)
+// ==========================================
+// 7. 🔥 MAIN RUN FUNCTION (REQUIRED FOR PLUGIN)
+// ==========================================
+
+async function run(payload) {
+    // অ্যাকশন ডিটেকশন (ডিফল্ট: LOGIN_CHECK)
+    const action = payload.action ? payload.action.toUpperCase() : 'CHECK';
+
+    console.log(`▶ Executing Action: ${action}`);
+
+    switch (action) {
+        case 'LOGIN':
+        case 'LOGIN_CHECK':
+        case 'CHECK':
+            return await verifyLoginDetails(payload);
+        
+        case 'INVENTORY':
+        case 'LIST':
+            return await getInventoryList(payload);
+
+        case 'POST':
+        case 'METER_POST':
+        case 'BATCH':
+            // বি:দ্র: ডায়নামিক কলের ক্ষেত্রে Progress Callback পাওয়া যাবে না যদি না index.js আপডেট করা হয়।
+            return await processBatch(payload);
+
+        case 'FAST':
+        case 'FAST_POST':
+        case 'CONCURRENT':
+            return await processConcurrentBatch(payload);
+
+        default:
+            return { error: `Unknown Action: ${action} in rebpbs.js` };
+    }
+}
+
+// 🔥 EXPORTS: run ফাংশন অবশ্যই থাকতে হবে
 module.exports = {
+    run, 
     verifyLoginDetails,
     getInventoryList,
     processBatch,
