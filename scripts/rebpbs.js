@@ -13,14 +13,13 @@ async function login(userId, password) {
         const $ = cheerio.load(initialPage.data);
         const initialCookies = initialPage.headers['set-cookie'] || [];
 
-        // ফর্ম ডাটা সংগ্রহ
         const payload = {
             '__VIEWSTATE': $('#__VIEWSTATE').val(),
             '__VIEWSTATEGENERATOR': $('#__VIEWSTATEGENERATOR').val(),
             '__EVENTVALIDATION': $('#__EVENTVALIDATION').val(),
             'txtusername': userId,
             'txtpassword': password,
-            'btnLogin': decodeURIComponent('%E0%A6%B2%E0%A6%97%E0%A6%87%E0%A6%A8') // 'লগইন' এর এনকোডেড ভ্যালু
+            'btnLogin': decodeURIComponent('%E0%A6%B2%E0%A6%97%E0%A6%87%E0%A6%A8')
         };
 
         const response = await axios.post(url, qs.stringify(payload), {
@@ -33,7 +32,6 @@ async function login(userId, password) {
         });
 
         const authCookies = response.headers['set-cookie'] || [];
-        // কুকি মার্জ করা (Initial + Auth Cookies)
         return [...new Set([...initialCookies, ...authCookies])];
     } catch (error) {
         console.error("Login Error:", error.message);
@@ -42,7 +40,7 @@ async function login(userId, password) {
 }
 
 // ==========================================
-// 2. ACTION: VERIFY LOGIN
+// 2. EXPORTED FUNCTIONS (CORE LOGIC)
 // ==========================================
 
 async function verifyLoginDetails({ userid, password }) {
@@ -66,21 +64,11 @@ async function verifyLoginDetails({ userid, password }) {
             zonalName = userInfo.split(',').pop().replace(']', '').trim();
         }
 
-        return { 
-            success: true, 
-            cookies: cookies,
-            userInfo: userInfo,
-            pbs: pbsName || "N/A", 
-            zonal: zonalName 
-        };
+        return { success: true, cookies, userInfo, pbs: pbsName || "N/A", zonal: zonalName };
     } catch (error) {
         return { success: false, message: error.message };
     }
 }
-
-// ==========================================
-// 3. HELPER: INTERNAL METER POST
-// ==========================================
 
 const DEFAULTS = {
     payMode: '1', manfId: '581', phase: '1', type: 'j-39',
@@ -90,25 +78,14 @@ const DEFAULTS = {
 async function postMeterData(cookies, m, options = {}) {
     const url = 'http://www.rebpbs.com/UI/Setup/meterinfo_setup.aspx';
     const session = axios.create({
-        headers: { 
-            'User-Agent': 'Mozilla/5.0',
-            'Content-Type': 'application/x-www-form-urlencoded',
-            'Cookie': cookies.join('; '),
-            'Referer': url
-        },
+        headers: { 'User-Agent': 'Mozilla/5.0', 'Content-Type': 'application/x-www-form-urlencoded', 'Cookie': cookies.join('; '), 'Referer': url },
         timeout: 30000 
     });
 
     try {
         let newVS, newEV, pbs, zonal, gen;
-
-        // অপ্টিমাইজেশন: যদি আগের পেজ টোকেন থাকে তবে রিকোয়েস্ট কম লাগবে
         if (options.viewState) {
-            newVS = options.viewState;
-            newEV = options.eventValidation;
-            gen = options.viewStateGen;
-            pbs = options.pbs;
-            zonal = options.zonal;
+            newVS = options.viewState; newEV = options.eventValidation; gen = options.viewStateGen; pbs = options.pbs; zonal = options.zonal;
         } else {
             const page = await session.get(url);
             const $ = cheerio.load(page.data);
@@ -161,20 +138,12 @@ async function postMeterData(cookies, m, options = {}) {
         const finalRes = await session.post(url, savePayload);
         const $res = cheerio.load(finalRes.data);
         const lblMsg = $res('#ctl00_ContentPlaceHolder1_lblMsg').text().trim();
-
         const isSuccess = finalRes.data.includes('Successful') || finalRes.data.includes('Action was Successful');
         const isDuplicate = finalRes.data.includes('Already Exists') || lblMsg.includes('exists');
         
-        // রেজাল্ট প্রসেসিং
-        let reason = isSuccess ? "Saved Successfully" : (isDuplicate ? "Duplicate Meter" : (lblMsg || "Server Rejected"));
-
-        return { success: isSuccess, reason: reason, isDuplicate };
+        return { success: isSuccess, reason: isSuccess ? "Saved Successfully" : (isDuplicate ? "Duplicate Meter" : (lblMsg || "Server Rejected")), isDuplicate };
     } catch (e) { return { success: false, reason: e.message }; }
 }
-
-// ==========================================
-// 4. ACTION: INVENTORY LIST
-// ==========================================
 
 async function fetchInventoryInternal(cookies, limit) {
     const url = 'http://www.rebpbs.com/UI/OfficeAutomation/Monitoring/EngineeringAndMaintenance/frmMeterInventoryMonitoring.aspx';
@@ -185,43 +154,23 @@ async function fetchInventoryInternal(cookies, limit) {
     try {
         const res = await session.get(url);
         let $ = cheerio.load(res.data);
-        
-        // টেবিল পার্সিং ফাংশন
         const parse = ($) => {
             const list = [];
             $('#ctl00_ContentPlaceHolder1_gvMeterLOG tr').each((i, el) => {
-                if (i === 0) return; // হেডার বাদ
+                if (i === 0) return;
                 const cols = $(el).children('td');
                 if (cols.length >= 9) {
                     const mNo = $(cols[1]).text().trim();
-                    if (mNo.length > 3) {
-                        list.push({ 
-                            brand: $(cols[0]).text().trim(), 
-                            meterNo: mNo, 
-                            status: $(cols[2]).text().trim(), 
-                            cmo: $(cols[5]).text().trim().replace(/&nbsp;/g, '') || "N/A", 
-                            seal: $(cols[6]).text().trim(), 
-                            date: $(cols[8]).text().trim() 
-                        });
-                    }
+                    if (mNo.length > 3) list.push({ brand: $(cols[0]).text().trim(), meterNo: mNo, status: $(cols[2]).text().trim(), cmo: $(cols[5]).text().trim().replace(/&nbsp;/g, '') || "N/A", seal: $(cols[6]).text().trim(), date: $(cols[8]).text().trim() });
                 }
             });
             return list;
         };
-
         allMeters = parse($);
-
-        // পেজিনেশন হ্যান্ডলিং
         while (allMeters.length < limit) {
             currentPage++;
-            const payload = {
-                '__EVENTTARGET': 'ctl00$ContentPlaceHolder1$gvMeterLOG',
-                '__EVENTARGUMENT': `Page$${currentPage}`,
-                '__VIEWSTATE': $('#__VIEWSTATE').val(),
-                '__EVENTVALIDATION': $('#__EVENTVALIDATION').val(),
-                '__VIEWSTATEGENERATOR': $('#__VIEWSTATEGENERATOR').val()
-            };
             try {
+                const payload = { '__EVENTTARGET': 'ctl00$ContentPlaceHolder1$gvMeterLOG', '__EVENTARGUMENT': `Page$${currentPage}`, '__VIEWSTATE': $('#__VIEWSTATE').val(), '__EVENTVALIDATION': $('#__EVENTVALIDATION').val(), '__VIEWSTATEGENERATOR': $('#__VIEWSTATEGENERATOR').val() };
                 const nextRes = await session.post(url, qs.stringify(payload));
                 $ = cheerio.load(nextRes.data);
                 const newMeters = parse($);
@@ -236,205 +185,89 @@ async function fetchInventoryInternal(cookies, limit) {
 async function getInventoryList({ userid, password, limit }) {
     console.log(`📋 Fetching Inventory for: ${userid}`);
     const auth = await verifyLoginDetails({ userid, password });
-    
     if (!auth.success) return { error: auth.message };
-    
     const list = await fetchInventoryInternal(auth.cookies, limit || 50);
     return { count: list.length, data: list };
 }
 
-// ==========================================
-// 5. ACTION: BATCH PROCESSOR (SEQUENTIAL)
-// ==========================================
-
-async function processBatch({ userid, password, meters }, onProgress) {
-    console.log(`📦 Starting Batch Process: ${meters.length} meters`);
-    
-    let auth = await verifyLoginDetails({ userid, password });
+async function processBatch({ userid, password, meters }) {
+    console.log(`📦 Batch Process: ${meters.length} meters`);
+    const auth = await verifyLoginDetails({ userid, password });
     if (!auth.success) return { status: "error", message: auth.message };
-
-    const postResults = [];
-    let failedCount = 0;
-
-    for (let i = 0; i < meters.length; i++) {
-        const m = meters[i];
-
-        if (onProgress) {
-            onProgress({
-                current: i + 1,
-                total: meters.length,
-                lastMeter: m.meterNo,
-                status: "uploading"
-            });
-        }
-
-        let postRes = await postMeterData(auth.cookies, m);
-        if (!postRes.success && !postRes.isDuplicate) failedCount++;
-        postResults.push({ original: m, result: postRes });
-        
-        await new Promise(r => setTimeout(r, 1500)); // ডিলে
+    const results = [];
+    let failed = 0;
+    for (const m of meters) {
+        const res = await postMeterData(auth.cookies, m);
+        if (!res.success && !res.isDuplicate) failed++;
+        results.push({ meterNo: m.meterNo, status: res.success ? "SUCCESS" : "FAILED", reason: res.reason });
+        await new Promise(r => setTimeout(r, 1000));
     }
-
-    // ভেরিফিকেশন ধাপ
-    if(onProgress) onProgress({ current: meters.length, total: meters.length, lastMeter: "Verifying...", status: "verifying" });
-    await new Promise(r => setTimeout(r, 2000));
-
-    const fetchLimit = meters.length + 20; 
-    const inventoryList = await fetchInventoryInternal(auth.cookies, fetchLimit);
-
-    const finalOutput = postResults.map(item => {
-        const liveData = inventoryList.find(inv => 
-            inv.meterNo.toLowerCase() === item.original.meterNo.toLowerCase()
-        );
-
-        return {
-            manufacturer: liveData ? liveData.brand : "N/A",
-            meterNo: item.original.meterNo,
-            sealNo: item.original.sealNo,
-            postStatus: item.result.success ? "SUCCESS" : "FAILED",
-            isDuplicate: item.result.isDuplicate || false,
-            serverError: item.result.reason,
-            liveStatus: liveData ? liveData.status : "Not Verified",
-            cmo: liveData ? liveData.cmo : "N/A",
-            date: liveData ? liveData.date : "N/A"
-        };
-    });
-
-    return { 
-        status: "completed", 
-        count: meters.length, 
-        failed: failedCount, 
-        data: finalOutput 
-    };
+    return { status: "completed", count: meters.length, failed, data: results };
 }
 
-// ==========================================
-// 6. ACTION: CONCURRENT PROCESSOR (FAST)
-// ==========================================
-
-async function fetchPageTokens(cookies) {
+async function processConcurrentBatch({ userid, password, meters }) {
+    console.log(`🚀 Fast Process: ${meters.length} meters`);
+    const auth = await verifyLoginDetails({ userid, password });
+    if (!auth.success) return { status: "error", message: auth.message };
     const url = 'http://www.rebpbs.com/UI/Setup/meterinfo_setup.aspx';
+    let tokens = {};
     try {
-        const session = axios.create({ headers: { 'Cookie': cookies.join('; ') }, timeout: 30000 });
-        const response = await session.get(url);
-        const $ = cheerio.load(response.data);
-        return {
-            viewState: $('#__VIEWSTATE').val(),
-            eventValidation: $('#__EVENTVALIDATION').val(),
-            viewStateGen: $('#__VIEWSTATEGENERATOR').val(),
-            pbs: $('#ctl00_ContentPlaceHolder1_txtPBSName').val(),
-            zonal: $('#ctl00_ContentPlaceHolder1_txtZonalName').val(),
-            success: true
-        };
-    } catch (e) { return { success: false }; }
-}
-
-async function processConcurrentBatch({ userid, password, meters }, onProgress) {
-    console.log(`🚀 Starting Fast Process: ${meters.length} meters`);
-    
-    let auth = await verifyLoginDetails({ userid, password });
-    if (!auth.success) return { status: "error", message: auth.message };
-
-    const tokens = await fetchPageTokens(auth.cookies);
-    if (!tokens.success || !tokens.viewState) {
-        return { status: "error", message: "Failed to fetch initial page tokens" };
-    }
-
+        const page = await axios.get(url, { headers: { 'Cookie': auth.cookies.join('; ') } });
+        const $ = cheerio.load(page.data);
+        tokens = { viewState: $('#__VIEWSTATE').val(), eventValidation: $('#__EVENTVALIDATION').val(), viewStateGen: $('#__VIEWSTATEGENERATOR').val(), pbs: $('#ctl00_ContentPlaceHolder1_txtPBSName').val(), zonal: $('#ctl00_ContentPlaceHolder1_txtZonalName').val() };
+    } catch(e) { return { status: "error", message: "Token fetch failed" }; }
     let results = [];
-    const CHUNK_SIZE = 5; // ৫টি করে প্যারালাল রিকোয়েস্ট
-    let processedCount = 0;
-
+    const CHUNK_SIZE = 5;
     for (let i = 0; i < meters.length; i += CHUNK_SIZE) {
         const chunk = meters.slice(i, i + CHUNK_SIZE);
-        
-        const chunkPromises = chunk.map(async (m) => {
-            try {
-                let result = await postMeterData(auth.cookies, m, tokens);
-                
-                processedCount++;
-                if (onProgress) {
-                    onProgress({
-                        current: processedCount,
-                        total: meters.length,
-                        lastMeter: m.meterNo,
-                        status: "fast-uploading"
-                    });
-                }
-
-                return {
-                    meterNo: m.meterNo,
-                    sealNo: m.sealNo,
-                    postStatus: result.success ? "SUCCESS" : "FAILED",
-                    reason: result.reason,
-                    isDuplicate: result.isDuplicate || false
-                };
-            } catch (error) {
-                return {
-                    meterNo: m.meterNo,
-                    sealNo: m.sealNo,
-                    postStatus: "FAILED",
-                    reason: "Network Error",
-                    isDuplicate: false
-                };
-            }
-        });
-
-        const chunkResults = await Promise.all(chunkPromises);
-        results = results.concat(chunkResults);
-
-        await new Promise(r => setTimeout(r, 1000)); 
+        const promises = chunk.map(m => postMeterData(auth.cookies, m, tokens).then(res => ({ meterNo: m.meterNo, status: res.success ? "SUCCESS" : "FAILED", reason: res.reason })));
+        results = results.concat(await Promise.all(promises));
     }
-
-    const failedCount = results.filter(r => r.postStatus === "FAILED" && !r.isDuplicate).length;
-
-    return { 
-        status: "completed_chunked", 
-        mode: "Smart Parallel (Chunked)",
-        count: meters.length, 
-        failed: failedCount, 
-        data: results 
-    };
+    return { status: "completed_chunked", count: meters.length, data: results };
 }
 
 // ==========================================
-// 7. 🔥 MAIN RUN FUNCTION (REQUIRED FOR PLUGIN)
+// 3. MAIN RUN FUNCTION (NO AUTO-DETECT)
 // ==========================================
 
 async function run(payload) {
-    // অ্যাকশন ডিটেকশন (সব আপারকেস করা যাতে Case Sensitive সমস্যা না হয়)
+    // অ্যাকশন চেক (অটো ডিটেকশন নেই, ডিফাল্ট 'CHECK')
     const action = payload.action ? payload.action.toUpperCase() : 'CHECK';
-
     console.log(`▶ Executing Action: ${action}`);
 
+    // ফ্লেক্সিবল সুইচ কেস (যাতে strictness না থাকে)
     switch (action) {
         case 'LOGIN':
         case 'LOGIN_CHECK':
         case 'CHECK':
+        case 'VERIFY':
+        case 'VERIFYLOGINDETAILS':
             return await verifyLoginDetails(payload);
         
-        // 🔥 ফিক্সড: সব ধরনের ইনভেন্টরি কি-ওয়ার্ড হ্যান্ডলিং
         case 'INVENTORY':
         case 'LIST':
-        case 'GETINVENTORYLIST': 
+        case 'GETINVENTORYLIST':
         case 'INVENTORY_LIST':
             return await getInventoryList(payload);
 
         case 'POST':
         case 'METER_POST':
         case 'BATCH':
+        case 'PROCESSBATCH':
             return await processBatch(payload);
 
         case 'FAST':
         case 'FAST_POST':
         case 'CONCURRENT':
+        case 'PROCESSCONCURRENTBATCH':
             return await processConcurrentBatch(payload);
 
         default:
-            return { error: `Unknown Action: ${action} in rebpbs.js` };
+            return { error: `Unknown Action: ${action}. Please specify a valid action.` };
     }
 }
 
-// 🔥 EXPORTS: run ফাংশন এবং অন্যান্য মডিউল এক্সপোর্ট করা
+// সবগুলো ফাংশন এক্সপোর্ট করা যাতে ডাইরেক্ট কল করা যায়
 module.exports = {
     run, 
     verifyLoginDetails,
