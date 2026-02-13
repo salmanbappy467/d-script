@@ -1,6 +1,11 @@
-const axios = require('axios');
-const cheerio = require('cheerio');
-const qs = require('querystring');
+let axios, cheerio, qs;
+try {
+    axios = require('axios');
+    cheerio = require('cheerio');
+    qs = require('qs');
+} catch (e) {
+    console.error("Dependency Load Warning:", e.message);
+}
 
 // ==========================================
 // 1. HELPER: INTERNAL LOGIN (NOT EXPORTED)
@@ -300,3 +305,4 @@ module.exports = {
     processBatch,
     processConcurrentBatch
 };
+
