@@ -3,7 +3,7 @@ const cheerio = require('cheerio');
 const qs = require('querystring');
 
 // ==========================================
-// 1. HELPER: INTERNAL LOGIN (NOT EXPORTED)
+// 1-4.3. HELPER: INTERNAL LOGIN (NOT EXPORTED)
 // ==========================================
 
 async function login(userId, password) {
@@ -303,3 +303,4 @@ module.exports = {
     processBatch,
     processConcurrentBatch
 };
+
