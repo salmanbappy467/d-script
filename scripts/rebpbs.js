@@ -32,6 +32,7 @@ async function login(userId, password) {
         });
 
         const authCookies = response.headers['set-cookie'] || [];
+        // কুকি মার্জ করা (রিপিটেশন এড়ানো)
         return [...new Set([...initialCookies, ...authCookies])];
     } catch (error) {
         console.error("Login Error:", error.message);
@@ -57,7 +58,6 @@ async function verifyLoginDetails({ userid, password }) {
         const response = await axios.get(dashUrl, { headers: { 'Cookie': cookies.join('; ') } });
         const $ = cheerio.load(response.data);
 
-        // 🔥 ফিক্স: লগইন আসলেই হয়েছে কি না চেক করা
         const pbsName = $('#ctl00_lblPBSname').text().trim();
         const userInfo = $('#ctl00_lblLoggedUser').text().trim();
 
@@ -111,33 +111,41 @@ async function postMeterData(cookies, m, options = {}) {
             '__VIEWSTATE': newVS, '__VIEWSTATEGENERATOR': gen, '__EVENTVALIDATION': newEV,
             'ctl00$ContentPlaceHolder1$txtPBSName': pbs,
             'ctl00$ContentPlaceHolder1$txtZonalName': zonal,
+            
+            // 🔥 ফিক্সড: ডায়নামিক ভ্যালু চেকিং (ইনপুট থাকলে সেটি, না থাকলে ডিফল্ট)
             'ctl00$ContentPlaceHolder1$ddlMeterPaymentMode': String(m.paymentMode || DEFAULTS.payMode),
             'ctl00$ContentPlaceHolder1$ddlMANUFACTUREname': String(m.manufacturerId || DEFAULTS.manfId),
             'ctl00$ContentPlaceHolder1$ddlPhase': String(m.phase || DEFAULTS.phase),
             'ctl00$ContentPlaceHolder1$txtMETER_NO': String(m.meterNo),
             'ctl00$ContentPlaceHolder1$txtSEAL_NO': String(m.sealNo),
             'ctl00$ContentPlaceHolder1$txtBULK_METER_NO': DEFAULTS.zero,
+            
             'ctl00$ContentPlaceHolder1$txtMETER_TYPE': m.meterType || DEFAULTS.type,
             'ctl00$ContentPlaceHolder1$txtVOLT': String(m.volt || DEFAULTS.volt),
             'ctl00$ContentPlaceHolder1$txtMULTIPLIER': DEFAULTS.mult,
-            'ctl00$ContentPlaceHolder1$txtINITIAL_READING': DEFAULTS.zero,
-            'ctl00$ContentPlaceHolder1$txtDEMAND_READING': DEFAULTS.zero,
-            'ctl00$ContentPlaceHolder1$txtKWH_READING': DEFAULTS.zero,
-            'ctl00$ContentPlaceHolder1$txtCT_DATA_MANUFACTURER': DEFAULTS.zero,
+            
+            'ctl00$ContentPlaceHolder1$txtINITIAL_READING': m.initialReading || DEFAULTS.zero,
+            'ctl00$ContentPlaceHolder1$txtDEMAND_READING': m.demandReading || DEFAULTS.zero,
+            'ctl00$ContentPlaceHolder1$txtKWH_READING': m.kwhReading || DEFAULTS.zero,
+            
+            'ctl00$ContentPlaceHolder1$txtCT_DATA_MANUFACTURER': m.ctManufacturer || DEFAULTS.zero,
             'ctl00$ContentPlaceHolder1$txtCT_SERIAL_NO': DEFAULTS.zero,
             'ctl00$ContentPlaceHolder1$txtCT_RATIO': DEFAULTS.mult,
-            'ctl00$ContentPlaceHolder1$txtCT_SEAL_NO': DEFAULTS.zero,
+            'ctl00$ContentPlaceHolder1$txtCT_SEAL_NO': m.ctSeal || DEFAULTS.zero,
+            
             'ctl00$ContentPlaceHolder1$txtPT_DATA_MANUFACTURER': DEFAULTS.zero,
             'ctl00$ContentPlaceHolder1$txtPT_SERIAL_NO': DEFAULTS.zero,
             'ctl00$ContentPlaceHolder1$txtPT_RATIO': DEFAULTS.mult,
             'ctl00$ContentPlaceHolder1$txtPT_SEAL_NO': DEFAULTS.zero,
             'ctl00$ContentPlaceHolder1$txtPT_MULTIPLYING_FACTOR': DEFAULTS.zero,
+            
             'ctl00$ContentPlaceHolder1$txtBODY_SEAL': DEFAULTS.zero,
             'ctl00$ContentPlaceHolder1$txtTERMINAL': DEFAULTS.zero,
-            'ctl00$ContentPlaceHolder1$txtBODY_SEAL1': DEFAULTS.sealTxt,
+            'ctl00$ContentPlaceHolder1$txtBODY_SEAL1': m.bodySeal1 || DEFAULTS.sealTxt,
             'ctl00$ContentPlaceHolder1$txtTERMINAL2': DEFAULTS.zero,
-            'ctl00$ContentPlaceHolder1$txtBODY_SEAL2': DEFAULTS.sealTxt,
+            'ctl00$ContentPlaceHolder1$txtBODY_SEAL2': m.bodySeal2 || DEFAULTS.sealTxt,
             'ctl00$ContentPlaceHolder1$txtBODY_SEAL3': DEFAULTS.zero,
+            
             'ctl00$ContentPlaceHolder1$ddlQMeterPaymentMode': '1',
             'ctl00$ContentPlaceHolder1$txtSearch': '',
             'ctl00$ContentPlaceHolder1$btSave': decodeURIComponent('%E0%A6%B8%E0%A6%82%E0%A6%B0%E0%A6%95%E0%A7%8D%E0%A6%B7%E0%A6%A3%20%E0%A6%95%E0%A6%B0%E0%A7%81%E0%A6%A8')
@@ -146,6 +154,7 @@ async function postMeterData(cookies, m, options = {}) {
         const finalRes = await session.post(url, savePayload);
         const $res = cheerio.load(finalRes.data);
         const lblMsg = $res('#ctl00_ContentPlaceHolder1_lblMsg').text().trim();
+        
         const isSuccess = finalRes.data.includes('Successful') || finalRes.data.includes('Action was Successful');
         const isDuplicate = finalRes.data.includes('Already Exists') || lblMsg.includes('exists');
         
@@ -163,14 +172,12 @@ async function fetchInventoryInternal(cookies, limit) {
         const res = await session.get(url);
         let $ = cheerio.load(res.data);
         
-        // 🔥 ফিক্স: পেজ ভ্যালিডেশন
         if ($('#txtusername').length > 0) {
             console.log("⚠️ Redirected to Login Page!");
             return [];
         }
         if ($('#ctl00_ContentPlaceHolder1_gvMeterLOG').length === 0) {
             console.log("⚠️ Table not found (Maybe no records).");
-            // return []; // টেবিল না থাকলে রিটার্ন
         }
 
         const parse = ($) => {
@@ -204,16 +211,12 @@ async function fetchInventoryInternal(cookies, limit) {
 async function getInventoryList({ userid, password, limit }) {
     console.log(`📋 Fetching Inventory for: ${userid}`);
     
-    // ১. লগইন ভেরিফিকেশন (স্ট্রং চেক)
     const auth = await verifyLoginDetails({ userid, password });
-    
-    // ২. যদি লগইন ফেল করে তবে সরাসরি এরর রিটার্ন
     if (!auth.success) {
         console.log(`❌ Inventory Fetch Aborted: ${auth.message}`);
         return { count: 0, data: [], error: auth.message };
     }
     
-    // ৩. ডাটা ফেচ
     const list = await fetchInventoryInternal(auth.cookies, limit || 50);
     return { count: list.length, data: list };
 }
